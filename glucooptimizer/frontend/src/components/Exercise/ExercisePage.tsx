@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { Plus, Shield, AlertTriangle, CheckCircle, Dumbbell, Zap, Heart } from 'lucide-react';
+import { Plus, Shield, AlertTriangle, CheckCircle, Dumbbell, Zap, Heart, Flame } from 'lucide-react';
 import { exerciseApi } from '../../services/api';
+import { useAuthStore } from '../../store/authStore';
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
   strength: <Dumbbell size={16} />,
@@ -30,7 +31,23 @@ interface ExerciseProgram {
   exercises: Array<{ name: string; sets: number; reps: string | number; rest: number }>;
 }
 
+// MET-based kcal preview (mirrors backend logic)
+function previewKcal(type: string, intensity: number, durationMin: number, weightKg?: number): number | null {
+  if (!weightKg) return null;
+  const i = intensity || 5;
+  const mets: Record<string, number> = {
+    strength: i <= 3 ? 3.5 : i <= 6 ? 5.0 : 6.0,
+    hiit:     i <= 4 ? 7.0 : i <= 7 ? 10.0 : 12.5,
+    cardio:   i <= 3 ? 4.0 : i <= 6 ? 7.0 : 10.0,
+    yoga:     2.5,
+    other:    i <= 4 ? 4.0 : 6.0,
+  };
+  const met = mets[type] || 4.0;
+  return Math.round(met * weightKg * (durationMin / 60));
+}
+
 export default function ExercisePage() {
+  const { user } = useAuthStore();
   const [date] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [showForm, setShowForm] = useState(false);
   const [activeTab, setActiveTab] = useState<'log' | 'programs'>('log');
@@ -153,6 +170,19 @@ export default function ExercisePage() {
                   <label className="label">Intensidad: {form.intensity}/10</label>
                   <input type="range" min="1" max="10" className="w-full accent-emerald-500" value={form.intensity} onChange={(e) => setForm({ ...form, intensity: e.target.value })} />
                 </div>
+                {/* Kcal burn preview */}
+                {(() => {
+                  const kcal = previewKcal(form.type, Number(form.intensity), Number(form.duration), user?.profile?.weightKg);
+                  return kcal !== null ? (
+                    <div className="flex items-center gap-2 bg-slate-900 rounded-xl px-4 py-2 text-sm">
+                      <Flame size={14} className="text-orange-400" />
+                      <span className="text-slate-400">Kcal estimadas quemadas:</span>
+                      <span className="text-orange-400 font-semibold">{kcal} kcal</span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-600 px-1">Añade tu peso en Ajustes → Perfil para ver kcal quemadas</p>
+                  );
+                })()}
                 <div className="flex gap-3">
                   <button type="submit" className="btn-primary" disabled={logSession.isPending}>
                     {logSession.isPending ? 'Guardando...' : 'Guardar sesión'}
@@ -164,21 +194,35 @@ export default function ExercisePage() {
           )}
 
           {/* Today's sessions */}
+          {data?.totalKcalBurned > 0 && (
+            <div className="flex items-center justify-between bg-orange-500/10 border border-orange-500/20 rounded-xl px-4 py-3">
+              <span className="text-slate-400 text-sm">Total kcal quemadas hoy</span>
+              <span className="text-orange-400 font-bold flex items-center gap-1">
+                <Flame size={16} /> {data.totalKcalBurned} kcal
+              </span>
+            </div>
+          )}
           {data?.sessions?.length === 0 ? (
             <div className="card text-center py-10">
               <Dumbbell size={32} className="text-slate-600 mx-auto mb-2" />
               <p className="text-slate-500">Sin sesiones hoy</p>
             </div>
           ) : (
-            data?.sessions?.map((s: { _id: string; type: string; name: string; duration: number; intensity: number }) => (
+            data?.sessions?.map((s: { _id: string; type: string; name: string; duration: number; intensity: number; kcalBurned?: number }) => (
               <div key={s._id} className="card flex items-center gap-4">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${s.type === 'strength' ? 'bg-purple-500/10 text-purple-400' : s.type === 'hiit' ? 'bg-yellow-500/10 text-yellow-400' : 'bg-blue-500/10 text-blue-400'}`}>
                   {TYPE_ICONS[s.type] || <Dumbbell size={16} />}
                 </div>
-                <div>
+                <div className="flex-1">
                   <p className="text-white font-medium">{s.name || TYPE_LABELS[s.type]}</p>
                   <p className="text-xs text-slate-400">{s.duration} min · Intensidad {s.intensity}/10</p>
                 </div>
+                {s.kcalBurned && (
+                  <div className="flex items-center gap-1 text-orange-400 text-sm font-semibold">
+                    <Flame size={14} />
+                    {s.kcalBurned} kcal
+                  </div>
+                )}
               </div>
             ))
           )}

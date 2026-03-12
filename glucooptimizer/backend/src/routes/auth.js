@@ -58,6 +58,7 @@ router.post(
           name: user.name,
           nightscoutConnected: user.nightscout.connected,
           targets: user.targets,
+          profile: user.profile,
           mlModel: user.mlModel,
         },
       });
@@ -75,9 +76,25 @@ router.get('/me', authMiddleware, (req, res) => {
     name: req.user.name,
     nightscoutConnected: req.user.nightscout.connected,
     targets: req.user.targets,
+    profile: req.user.profile,
     mlModel: req.user.mlModel,
     stats: req.user.stats,
   });
+});
+
+// PATCH /api/auth/profile
+router.patch('/profile', authMiddleware, async (req, res) => {
+  try {
+    const allowed = ['weightKg', 'heightCm', 'age', 'gender', 'activityLevel', 'carbRatio', 'insulinSensitivity'];
+    const updates = {};
+    allowed.forEach((key) => {
+      if (req.body[key] !== undefined) updates[`profile.${key}`] = req.body[key];
+    });
+    const user = await User.findByIdAndUpdate(req.user._id, { $set: updates }, { new: true });
+    res.json({ profile: user.profile });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // PATCH /api/auth/targets

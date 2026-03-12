@@ -16,6 +16,17 @@ const userSchema = new mongoose.Schema(
       lastSync: { type: Date },
     },
 
+    // Personal profile (for kcal burn and insulin calculations)
+    profile: {
+      weightKg: { type: Number },
+      heightCm: { type: Number },
+      age: { type: Number },
+      gender: { type: String, enum: ['male', 'female', 'other'] },
+      activityLevel: { type: String, enum: ['sedentary', 'light', 'moderate', 'active', 'very_active'], default: 'moderate' },
+      carbRatio: { type: Number, default: 10 },        // g carbs per unit insulin
+      insulinSensitivity: { type: Number, default: 50 }, // mg/dL drop per unit insulin
+    },
+
     // Personal targets
     targets: {
       glucoseLow: { type: Number, default: 70 },

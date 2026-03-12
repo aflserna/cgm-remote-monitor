@@ -35,6 +35,8 @@ export const authApi = {
   me: () => api.get('/auth/me').then((r) => r.data),
   updateTargets: (targets: Record<string, number>) =>
     api.patch('/auth/targets', targets).then((r) => r.data),
+  updateProfile: (profile: Record<string, unknown>) =>
+    api.patch('/auth/profile', profile).then((r) => r.data),
 };
 
 // Nightscout
@@ -77,4 +79,5 @@ export const analyticsApi = {
     api.get(`/analytics/daily${date ? `?date=${date}` : ''}`).then((r) => r.data),
   getWeekly: () => api.get('/analytics/weekly').then((r) => r.data),
   getAchievements: () => api.get('/analytics/achievements').then((r) => r.data),
+  getBasal: () => api.get('/analytics/basal').then((r) => r.data),
 };

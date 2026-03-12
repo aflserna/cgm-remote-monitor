@@ -12,6 +12,15 @@ export interface User {
     proteinG: number;
     fatG: number;
   };
+  profile?: {
+    weightKg?: number;
+    heightCm?: number;
+    age?: number;
+    gender?: string;
+    activityLevel?: string;
+    carbRatio?: number;
+    insulinSensitivity?: number;
+  };
   mlModel: {
     personalDataDays: number;
     lastFineTuned: string | null;
@@ -78,6 +87,7 @@ export interface ExerciseSession {
   timestamp: string;
   duration: number;
   intensity: number;
+  kcalBurned?: number;
 }
 
 export interface DailyScore {

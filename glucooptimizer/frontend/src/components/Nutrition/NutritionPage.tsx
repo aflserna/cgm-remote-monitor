@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { Plus, Search, Trash2, Salad } from 'lucide-react';
+import { Plus, Search, Trash2, Salad, Syringe } from 'lucide-react';
 import { mealsApi } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
 import { Meal } from '../../types';
@@ -22,6 +22,15 @@ interface FoodResult {
   per100g: { carbs: number; protein: number; fat: number; kcal: number; fiber: number };
 }
 
+interface BolusEstimate {
+  carbBolus: number;
+  correctionBolus: number;
+  iobSubtracted: number;
+  total: number;
+  carbRatioUsed: number;
+  isfUsed: number | null;
+}
+
 function MacroBadge({ label, value, unit, color }: { label: string; value: number; unit: string; color: string }) {
   return (
     <div className={`text-center px-3 py-2 rounded-xl ${color}`}>
@@ -36,7 +45,9 @@ export default function NutritionPage() {
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [showForm, setShowForm] = useState(false);
   const [searchQ, setSearchQ] = useState('');
+  const [foodGrams, setFoodGrams] = useState<Record<string, string>>({});
   const [form, setForm] = useState({ name: '', mealType: 'snack', carbs: '', protein: '', fat: '', kcal: '', notes: '' });
+  const [lastBolus, setLastBolus] = useState<BolusEstimate | null>(null);
   const queryClient = useQueryClient();
 
   const { data } = useQuery({
@@ -52,10 +63,13 @@ export default function NutritionPage() {
 
   const logMeal = useMutation({
     mutationFn: mealsApi.log,
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['meals', date] });
       setShowForm(false);
       setForm({ name: '', mealType: 'snack', carbs: '', protein: '', fat: '', kcal: '', notes: '' });
+      if (data.bolusEstimate) {
+        setLastBolus(data.bolusEstimate);
+      }
     },
   });
 
@@ -66,6 +80,7 @@ export default function NutritionPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setLastBolus(null);
     logMeal.mutate({
       name: form.name,
       mealType: form.mealType,
@@ -80,6 +95,7 @@ export default function NutritionPage() {
     });
   };
 
+  // Auto-calculate macros based on selected food + entered grams
   const fillFromFood = (food: FoodResult, grams: number) => {
     const ratio = grams / 100;
     setForm((f) => ({
@@ -92,6 +108,26 @@ export default function NutritionPage() {
     }));
     setShowForm(true);
   };
+
+  const getGramsForFood = (foodId: string) => Number(foodGrams[foodId] || 100);
+
+  // Live kcal preview when typing macros manually
+  const liveKcal = form.kcal
+    ? Number(form.kcal)
+    : (Number(form.carbs) || 0) * 4 + (Number(form.protein) || 0) * 4 + (Number(form.fat) || 0) * 9;
+
+  // Live bolus preview using user profile parameters
+  const liveBolus = (() => {
+    const carbRatio = user?.profile?.carbRatio;
+    const isf = user?.profile?.insulinSensitivity;
+    const carbs = Number(form.carbs) || 0;
+    if (!carbRatio || carbs === 0) return null;
+    const carbBolus = carbs / carbRatio;
+    const correctionBolus = isf
+      ? ((user?.targets.glucoseLow ?? 70) + ((user?.targets.glucoseHigh ?? 180) - (user?.targets.glucoseLow ?? 70)) / 2 - 125) / isf
+      : 0;
+    return Math.max(0, Math.round((carbBolus + correctionBolus) * 10) / 10);
+  })();
 
   const totals = data?.totals || { kcal: 0, carbs: 0, protein: 0, fat: 0 };
   const targets = user?.targets;
@@ -143,6 +179,41 @@ export default function NutritionPage() {
         </div>
       )}
 
+      {/* Bolus result after logging */}
+      {lastBolus && (
+        <div className="card border border-blue-500/30 bg-blue-500/5">
+          <div className="flex items-start gap-3">
+            <Syringe size={18} className="text-blue-400 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold text-blue-400 text-sm mb-2">Bolo recomendado</p>
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div>
+                  <p className="text-xs text-slate-500">Por CH</p>
+                  <p className="text-white font-semibold">{lastBolus.carbBolus}u</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Corrección</p>
+                  <p className={`font-semibold ${lastBolus.correctionBolus >= 0 ? 'text-yellow-400' : 'text-emerald-400'}`}>
+                    {lastBolus.correctionBolus > 0 ? '+' : ''}{lastBolus.correctionBolus}u
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">IOB restado</p>
+                  <p className="text-slate-400 font-semibold">-{lastBolus.iobSubtracted}u</p>
+                </div>
+                <div className="border-l border-blue-500/30">
+                  <p className="text-xs text-slate-500">Total</p>
+                  <p className="text-blue-300 font-bold text-lg">{lastBolus.total}u</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-600 mt-2">
+                Ratio CH: 1u/{lastBolus.carbRatioUsed}g · ISF: {lastBolus.isfUsed ?? '—'} mg/dL/u
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Food search */}
       <div className="card space-y-3">
         <h2 className="text-sm font-medium text-slate-400">Buscar alimento</h2>
@@ -159,16 +230,39 @@ export default function NutritionPage() {
           </button>
         </div>
         {searchResults?.length > 0 && (
-          <div className="space-y-2 max-h-48 overflow-y-auto">
+          <div className="space-y-2 max-h-56 overflow-y-auto">
             {searchResults.map((food: FoodResult) => (
-              <div key={food.id} className="flex items-center justify-between bg-slate-800 px-3 py-2 rounded-lg text-sm">
-                <div>
-                  <p className="text-white">{food.name}</p>
-                  <p className="text-xs text-slate-500">{food.per100g.carbs}g CH · {food.per100g.protein}g P · {food.per100g.kcal}kcal (por 100g)</p>
+              <div key={food.id} className="bg-slate-800 px-3 py-2 rounded-lg text-sm space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white">{food.name}</p>
+                    <p className="text-xs text-slate-500">{food.per100g.carbs}g CH · {food.per100g.protein}g P · {food.per100g.kcal}kcal (por 100g)</p>
+                  </div>
                 </div>
-                <button className="btn-secondary text-xs px-2 py-1" onClick={() => fillFromFood(food, 100)}>
-                  Usar 100g
-                </button>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    className="input w-24 text-sm py-1"
+                    placeholder="100"
+                    min="1"
+                    value={foodGrams[food.id] || ''}
+                    onChange={(e) => setFoodGrams((prev) => ({ ...prev, [food.id]: e.target.value }))}
+                  />
+                  <span className="text-slate-500 text-xs">gramos</span>
+                  <div className="flex gap-1 text-xs text-slate-400 flex-1">
+                    <span>{Math.round(food.per100g.carbs * getGramsForFood(food.id) / 100)}g CH</span>
+                    <span>·</span>
+                    <span>{Math.round(food.per100g.protein * getGramsForFood(food.id) / 100)}g P</span>
+                    <span>·</span>
+                    <span className="text-orange-400">{Math.round(food.per100g.kcal * getGramsForFood(food.id) / 100)} kcal</span>
+                  </div>
+                  <button
+                    className="btn-secondary text-xs px-2 py-1"
+                    onClick={() => fillFromFood(food, getGramsForFood(food.id))}
+                  >
+                    Usar
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -209,6 +303,19 @@ export default function NutritionPage() {
                 <label className="label">Kcal</label>
                 <input className="input" type="number" placeholder="auto" value={form.kcal} onChange={(e) => setForm({ ...form, kcal: e.target.value })} />
               </div>
+            </div>
+            {/* Live preview */}
+            <div className="flex items-center justify-between bg-slate-900 rounded-xl px-4 py-2 text-sm">
+              <span className="text-slate-400">Kcal calculadas: <span className="text-orange-400 font-semibold">{Math.round(liveKcal)}</span></span>
+              {liveBolus !== null && (
+                <span className="flex items-center gap-1 text-blue-400">
+                  <Syringe size={13} />
+                  Bolo estimado: <span className="font-semibold">{liveBolus}u</span>
+                </span>
+              )}
+              {user?.profile?.carbRatio === undefined && (
+                <span className="text-slate-600 text-xs">Configura ratio CH en Ajustes para ver bolo</span>
+              )}
             </div>
             <div className="flex gap-3">
               <button type="submit" className="btn-primary" disabled={logMeal.isPending}>

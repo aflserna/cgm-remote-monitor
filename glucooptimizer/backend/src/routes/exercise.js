@@ -6,6 +6,25 @@ const authMiddleware = require('../middleware/auth');
 
 const router = express.Router();
 
+// MET values by exercise type and intensity (1-10)
+function getMET(type, intensity) {
+  const i = intensity || 5;
+  const mets = {
+    strength: i <= 3 ? 3.5 : i <= 6 ? 5.0 : 6.0,
+    hiit:     i <= 4 ? 7.0 : i <= 7 ? 10.0 : 12.5,
+    cardio:   i <= 3 ? 4.0 : i <= 6 ? 7.0 : 10.0,
+    yoga:     2.5,
+    other:    i <= 4 ? 4.0 : 6.0,
+  };
+  return mets[type] || 4.0;
+}
+
+function estimateKcalBurned(type, intensity, durationMin, weightKg) {
+  if (!weightKg) return null;
+  const met = getMET(type, intensity);
+  return Math.round(met * weightKg * (durationMin / 60));
+}
+
 // Exercise glucose impact profiles (minutes post-start)
 const EXERCISE_GLUCOSE_PROFILES = {
   strength: {
@@ -59,10 +78,17 @@ router.post(
         }
       }
 
-      const session = await ExerciseSession.create(sessionData);
+      // Estimate kcal burned using MET formula
+      const weightKg = req.user.profile?.weightKg;
+      const kcalBurned = estimateKcalBurned(req.body.type, req.body.intensity, req.body.duration, weightKg);
+      if (kcalBurned !== null) {
+        await ExerciseSession.findByIdAndUpdate(session._id, { $set: { kcalBurned } });
+        session.kcalBurned = kcalBurned;
+      }
+
       const profile = EXERCISE_GLUCOSE_PROFILES[req.body.type] || {};
 
-      res.status(201).json({ session, glucoseProfile: profile });
+      res.status(201).json({ session, glucoseProfile: profile, kcalBurned });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -84,8 +110,9 @@ router.get('/', authMiddleware, async (req, res) => {
     }).sort({ timestamp: 1 });
 
     const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration || 0), 0);
+    const totalKcalBurned = sessions.reduce((sum, s) => sum + (s.kcalBurned || 0), 0);
 
-    res.json({ sessions, totalMinutes });
+    res.json({ sessions, totalMinutes, totalKcalBurned });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

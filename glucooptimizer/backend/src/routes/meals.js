@@ -50,7 +50,29 @@ router.post(
       }
 
       const meal = await Meal.create(mealData);
-      res.status(201).json(meal);
+
+      // Calculate bolus estimate if profile has insulin parameters
+      let bolusEstimate = null;
+      const carbRatio = req.user.profile?.carbRatio;
+      const isf = req.user.profile?.insulinSensitivity;
+      if (carbRatio && mealData.macros?.carbs > 0) {
+        const targetGlucose = req.user.targets.glucoseLow + (req.user.targets.glucoseHigh - req.user.targets.glucoseLow) / 2;
+        const currentGlucose = mealData.glucoseContext?.atMeal || targetGlucose;
+        const iob = mealData.glucoseContext?.iob || 0;
+        const carbBolus = mealData.macros.carbs / carbRatio;
+        const correctionBolus = isf ? (currentGlucose - targetGlucose) / isf : 0;
+        const total = Math.max(0, carbBolus + correctionBolus - iob);
+        bolusEstimate = {
+          carbBolus: Math.round(carbBolus * 10) / 10,
+          correctionBolus: Math.round(correctionBolus * 10) / 10,
+          iobSubtracted: Math.round(iob * 10) / 10,
+          total: Math.round(total * 10) / 10,
+          carbRatioUsed: carbRatio,
+          isfUsed: isf || null,
+        };
+      }
+
+      res.status(201).json({ ...meal.toObject(), bolusEstimate });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

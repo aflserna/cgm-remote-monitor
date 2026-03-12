@@ -204,4 +204,104 @@ router.get('/achievements', authMiddleware, async (req, res) => {
   });
 });
 
+// GET /api/analytics/basal - basal insulin data and recommendations
+router.get('/basal', authMiddleware, async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(today);
+    todayEnd.setHours(23, 59, 59, 999);
+
+    // Get today's exercise for activity-based recommendations
+    const exercise = await ExerciseSession.find({
+      userId: req.user._id,
+      timestamp: { $gte: today, $lte: todayEnd },
+    });
+
+    const activityMinutes = exercise.reduce((sum, s) => sum + (s.duration || 0), 0);
+    const exerciseTypes = [...new Set(exercise.map((e) => e.type))];
+
+    // Fetch basal from Nightscout
+    let currentBasal = null;
+    let tempBasalPercent = null;
+    let estimatedDailyBasal = null;
+
+    if (req.user.nightscout.connected) {
+      try {
+        const ns = new NightscoutService(req.user.nightscout.url, req.user.nightscout.apiSecret);
+        const deviceStatus = await ns.getDeviceStatus();
+        currentBasal = deviceStatus?.basalRate || null;
+        tempBasalPercent = deviceStatus?.tempBasalPercent || null;
+        if (currentBasal) {
+          estimatedDailyBasal = Math.round(currentBasal * 24 * 10) / 10;
+        }
+      } catch {
+        // NS unavailable
+      }
+    }
+
+    // Generate recommendations to minimize basal
+    const recommendations = [];
+
+    if (activityMinutes >= 30) {
+      const hasCardio = exerciseTypes.includes('cardio') || exerciseTypes.includes('hiit');
+      if (hasCardio) {
+        recommendations.push({
+          type: 'exercise',
+          priority: 'high',
+          title: 'Sensibilidad aumentada por ejercicio',
+          text: `Has hecho ${activityMinutes} min de ejercicio hoy. Tu sensibilidad a la insulina está elevada — considera reducir la basal un 10-20% en las próximas horas para evitar hipoglucemias.`,
+        });
+      } else {
+        recommendations.push({
+          type: 'exercise',
+          priority: 'medium',
+          title: 'Ejercicio de fuerza registrado',
+          text: `El entrenamiento de fuerza puede mejorar la sensibilidad insulínica hasta 24h. Monitoriza tu glucosa nocturna.`,
+        });
+      }
+    } else {
+      recommendations.push({
+        type: 'activity',
+        priority: 'medium',
+        title: 'Añade ejercicio para reducir basal',
+        text: '30-45 min de cardio moderado (zona 2) puede reducir tu necesidad de insulina basal un 10-30% en las siguientes 6-12h.',
+      });
+    }
+
+    recommendations.push({
+      type: 'diet',
+      priority: 'high',
+      title: 'Dieta baja en carbohidratos',
+      text: 'Reducir carbohidratos a <50g/día puede disminuir la insulina basal necesaria un 20-40%. Las proteínas y grasas tienen mínimo impacto glucémico.',
+    });
+
+    recommendations.push({
+      type: 'fasting',
+      priority: 'medium',
+      title: 'Ayuno intermitente 16:8',
+      text: 'Comer dentro de una ventana de 8 horas reduce el tiempo de exposición a picos de glucosa y la demanda de insulina basal.',
+    });
+
+    if (tempBasalPercent !== null && tempBasalPercent < 100) {
+      recommendations.push({
+        type: 'current',
+        priority: 'info',
+        title: `Basal temporal activa: ${tempBasalPercent}%`,
+        text: 'Tu sistema de lazo cerrado (AndroidAPS) ya está reduciendo la basal actualmente.',
+      });
+    }
+
+    res.json({
+      currentBasal,
+      tempBasalPercent,
+      estimatedDailyBasal,
+      activityMinutes,
+      recommendations,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

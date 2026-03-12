@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Droplets, Zap, Activity, Flame, BrainCircuit, RefreshCw } from 'lucide-react';
+import { Droplets, Zap, Activity, Flame, BrainCircuit, RefreshCw, TrendingDown, AlertCircle } from 'lucide-react';
 import { nsApi, analyticsApi, predictionsApi } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
 import GlucoseChart from './GlucoseChart';
@@ -64,6 +64,12 @@ export default function DashboardPage() {
     refetchInterval: 300_000,
     enabled: !!user?.nightscoutConnected,
     retry: false,
+  });
+
+  const { data: basalData } = useQuery({
+    queryKey: ['basal'],
+    queryFn: analyticsApi.getBasal,
+    refetchInterval: 300_000,
   });
 
   const glucose = current?.glucose;
@@ -185,6 +191,53 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Basal insulin + recommendations */}
+      {basalData && (
+        <div className="card space-y-4">
+          <div className="flex items-center gap-2">
+            <TrendingDown size={16} className="text-purple-400" />
+            <h2 className="text-sm font-semibold text-slate-200">Insulina basal</h2>
+            {basalData.estimatedDailyBasal && (
+              <span className="ml-auto text-purple-400 font-semibold">{basalData.estimatedDailyBasal}u/día estimadas</span>
+            )}
+          </div>
+          {basalData.currentBasal && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-slate-900 rounded-xl px-4 py-3">
+                <p className="text-xs text-slate-500">Basal actual</p>
+                <p className="text-white font-semibold">{basalData.currentBasal.toFixed(3)} u/h</p>
+              </div>
+              {basalData.tempBasalPercent !== null && basalData.tempBasalPercent !== 100 && (
+                <div className="bg-slate-900 rounded-xl px-4 py-3">
+                  <p className="text-xs text-slate-500">Basal temporal</p>
+                  <p className={`font-semibold ${basalData.tempBasalPercent < 100 ? 'text-emerald-400' : 'text-yellow-400'}`}>
+                    {basalData.tempBasalPercent}%
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+          {basalData.recommendations?.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">Recomendaciones para minimizar basal</p>
+              {basalData.recommendations.map((rec: { type: string; priority: string; title: string; text: string }, i: number) => (
+                <div key={i} className={`flex gap-3 px-3 py-2.5 rounded-xl text-sm border ${
+                  rec.priority === 'high' ? 'bg-purple-500/10 border-purple-500/20' :
+                  rec.priority === 'info' ? 'bg-slate-800 border-slate-700' :
+                  'bg-slate-900 border-slate-800'
+                }`}>
+                  <AlertCircle size={15} className={rec.priority === 'high' ? 'text-purple-400 mt-0.5 shrink-0' : 'text-slate-500 mt-0.5 shrink-0'} />
+                  <div>
+                    <p className={`font-medium text-xs ${rec.priority === 'high' ? 'text-purple-300' : 'text-slate-300'}`}>{rec.title}</p>
+                    <p className="text-slate-400 text-xs mt-0.5">{rec.text}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
