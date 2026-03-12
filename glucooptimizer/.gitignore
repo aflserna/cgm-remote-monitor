@@ -1,0 +1,23 @@
+node_modules/
+.env
+dist/
+build/
+*.log
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.Python
+ml-service/venv/
+ml-service/models/personal/
+ml-service/data/
+
+# ML model weights (too large for git - use git-lfs or download separately)
+*.pt
+*.pth
+
+# OS
+.DS_Store
+Thumbs.db
